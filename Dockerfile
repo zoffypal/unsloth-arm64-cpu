@@ -132,11 +132,4 @@ RUN mkdir -p \
 
 EXPOSE 8000
 
-CMD [
-  "/opt/unsloth-studio/unsloth_studio/bin/unsloth",
-  "studio",
-  "-H",
-  "0.0.0.0",
-  "-p",
-  "8000"
-]
+CMD ["/opt/unsloth-studio/unsloth_studio/bin/unsloth", "studio", "-H", "0.0.0.0", "-p", "8000"]
