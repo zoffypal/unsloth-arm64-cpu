@@ -3,8 +3,9 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # ---------------------------------------------------------
-# Runtime / build dependencies
+# System dependencies
 # ---------------------------------------------------------
+
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     curl \
@@ -12,6 +13,9 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     libgl1 \
     libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
     build-essential \
     cmake \
     ninja-build \
@@ -19,56 +23,104 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------
-# Unsloth Studio configuration
+# Unsloth configuration
 # ---------------------------------------------------------
 
-# Do not install PyTorch.
-# This is the important part for Oracle A1.
+# Do NOT install PyTorch.
+# We want GGUF / llama.cpp CPU mode for Oracle Ampere A1.
 ENV UNSLOTH_NO_TORCH=1
 
-# Force llama.cpp to use CPU.
+# Force llama.cpp CPU backend.
 ENV UNSLOTH_LLAMA_CPP_BACKEND=cpu
 
-# Only install/use the llama.cpp path inside Studio.
+# Studio llama.cpp-only mode.
 ENV UNSLOTH_STUDIO_LLAMA_ONLY=1
 
-# Prevent installer from trying to start Studio during Docker build.
+# We are building inside Docker, so never try to launch interactively
+# during installation.
 ENV UNSLOTH_SKIP_AUTOSTART=1
 
-# Use Python 3.13 through Unsloth's installer / uv.
+# Use Python 3.13.
 ENV UNSLOTH_PYTHON=3.13
 
-# Keep Studio data in a predictable location.
+# Keep everything self-contained.
 ENV UNSLOTH_STUDIO_HOME=/opt/unsloth-studio
 
-# Avoid interactive terminal prompts during build.
-ENV NONINTERACTIVE=1
+# Runtime PATH.
+ENV PATH="/opt/unsloth-studio/bin:/opt/unsloth-studio/unsloth_studio/bin:/root/.local/bin:${PATH}"
 
 # ---------------------------------------------------------
-# Install Unsloth Studio
+# Install official Unsloth Studio
 # ---------------------------------------------------------
 
 RUN curl -fsSL https://unsloth.ai/install.sh | sh
 
-# The installer normally puts uv / Unsloth commands here.
-ENV PATH="/opt/unsloth-studio/bin:/opt/unsloth-studio/unsloth_studio/bin:${PATH}"
+# ---------------------------------------------------------
+# IMPORTANT:
+# The installer installs the core package, but Studio's optional
+# dependencies need to be installed explicitly for our no-torch
+# image.
+# ---------------------------------------------------------
+
+RUN /root/.local/bin/uv pip install \
+    --python /opt/unsloth-studio/unsloth_studio/bin/python \
+    "unsloth[studio]" \
+    --no-cache
 
 # ---------------------------------------------------------
-# Cleanup build-only packages
+# Verify Studio installation during image build
 # ---------------------------------------------------------
 
-RUN apt-get purge -y \
-    build-essential \
-    cmake \
-    ninja-build \
-    pkg-config \
-    git \
-    && \
-    apt-get autoremove -y && \
-    rm -rf /var/lib/apt/lists/* /tmp/*
+RUN /opt/unsloth-studio/unsloth_studio/bin/python - <<'PY'
+import importlib
+
+packages = [
+    "structlog",
+    "typer",
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "matplotlib",
+    "pandas",
+    "jwt",
+    "urllib3",
+    "jinja2",
+    "diceware",
+    "ddgs",
+    "cryptography",
+    "boto3",
+    "fastmcp",
+    "gguf",
+    "av",
+]
+
+missing = []
+
+for pkg in packages:
+    try:
+        importlib.import_module(pkg)
+        print(f"OK   {pkg}")
+    except Exception as exc:
+        print(f"FAIL {pkg}: {exc}")
+        missing.append(pkg)
+
+if missing:
+    raise SystemExit(
+        "Missing Studio dependencies: " + ", ".join(missing)
+    )
+
+print("All required Studio dependencies are installed.")
+PY
 
 # ---------------------------------------------------------
-# Runtime
+# Verify that PyTorch was NOT installed
+# ---------------------------------------------------------
+
+RUN ! /opt/unsloth-studio/unsloth_studio/bin/python -c \
+    "import torch"
+
+# ---------------------------------------------------------
+# Workspace
 # ---------------------------------------------------------
 
 WORKDIR /workspace
@@ -80,4 +132,11 @@ RUN mkdir -p \
 
 EXPOSE 8000
 
-CMD ["unsloth", "studio", "-H", "0.0.0.0", "-p", "8000"]
+CMD [
+  "/opt/unsloth-studio/unsloth_studio/bin/unsloth",
+  "studio",
+  "-H",
+  "0.0.0.0",
+  "-p",
+  "8000"
+]
