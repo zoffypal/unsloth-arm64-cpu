@@ -2,40 +2,82 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Unsloth installation root
-ENV HOME=/root
-
-# Unsloth Studio configuration
-ENV UNSLOTH_STUDIO_HOME=/root/.unsloth/studio
-ENV UNSLOTH_LLAMA_CPP_PATH=/root/.unsloth/llama.cpp
-ENV UNSLOTH_LLAMA_CPP_BACKEND=cpu
-
-# Make installed CLI available
-ENV PATH=/root/.local/bin:$PATH
-
+# ---------------------------------------------------------
+# Runtime / build dependencies
+# ---------------------------------------------------------
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     curl \
-    bash \
     git \
+    ffmpeg \
+    libgl1 \
+    libglib2.0-0 \
+    build-essential \
+    cmake \
+    ninja-build \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Unsloth in official no-torch mode.
-#
-# This skips PyTorch/CUDA and installs the GGUF/CPU runtime.
-RUN curl -fsSL https://unsloth.ai/install.sh \
-    -o /tmp/install.sh && \
-    chmod +x /tmp/install.sh && \
-    UNSLOTH_NO_TORCH=1 \
-    UNSLOTH_SKIP_AUTOSTART=1 \
-    UNSLOTH_STUDIO_HOME=/root/.unsloth/studio \
-    /bin/sh /tmp/install.sh && \
-    rm -f /tmp/install.sh
+# ---------------------------------------------------------
+# Unsloth Studio configuration
+# ---------------------------------------------------------
 
-# Force CPU llama.cpp backend
+# Do not install PyTorch.
+# This is the important part for Oracle A1.
+ENV UNSLOTH_NO_TORCH=1
+
+# Force llama.cpp to use CPU.
 ENV UNSLOTH_LLAMA_CPP_BACKEND=cpu
 
+# Only install/use the llama.cpp path inside Studio.
+ENV UNSLOTH_STUDIO_LLAMA_ONLY=1
+
+# Prevent installer from trying to start Studio during Docker build.
+ENV UNSLOTH_SKIP_AUTOSTART=1
+
+# Use Python 3.13 through Unsloth's installer / uv.
+ENV UNSLOTH_PYTHON=3.13
+
+# Keep Studio data in a predictable location.
+ENV UNSLOTH_STUDIO_HOME=/opt/unsloth-studio
+
+# Avoid interactive terminal prompts during build.
+ENV NONINTERACTIVE=1
+
+# ---------------------------------------------------------
+# Install Unsloth Studio
+# ---------------------------------------------------------
+
+RUN curl -fsSL https://unsloth.ai/install.sh | sh
+
+# The installer normally puts uv / Unsloth commands here.
+ENV PATH="/root/.local/bin:${PATH}"
+
+# ---------------------------------------------------------
+# Cleanup build-only packages
+# ---------------------------------------------------------
+
+RUN apt-get purge -y \
+    build-essential \
+    cmake \
+    ninja-build \
+    pkg-config \
+    git \
+    && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/* /tmp/*
+
+# ---------------------------------------------------------
+# Runtime
+# ---------------------------------------------------------
+
+WORKDIR /workspace
+
+RUN mkdir -p \
+    /workspace/models \
+    /workspace/projects \
+    /workspace/cache
+
 EXPOSE 8000
-EXPOSE 8888
 
 CMD ["unsloth", "studio", "-H", "0.0.0.0", "-p", "8000"]
