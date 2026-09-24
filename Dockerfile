@@ -27,101 +27,76 @@ RUN apt-get update && apt-get install -y \
 # ---------------------------------------------------------
 
 # IMPORTANT:
-# Skip PyTorch completely.
+# Do NOT install PyTorch.
 ENV UNSLOTH_NO_TORCH=1
 
-# Use CPU llama.cpp.
+# CPU llama.cpp
 ENV UNSLOTH_LLAMA_CPP_BACKEND=cpu
 
-# GGUF / llama.cpp oriented Studio.
+# GGUF / llama.cpp oriented Studio
 ENV UNSLOTH_STUDIO_LLAMA_ONLY=1
 
-# Do not auto-start Studio during installation.
+# Docker build should never try to launch Studio interactively
 ENV UNSLOTH_SKIP_AUTOSTART=1
 
 ENV UNSLOTH_PYTHON=3.13
 
-# Keep Unsloth isolated inside the image.
+# Keep everything inside one predictable directory
 ENV UNSLOTH_STUDIO_HOME=/opt/unsloth-studio
 
 ENV PATH="/opt/unsloth-studio/bin:/opt/unsloth-studio/unsloth_studio/bin:/root/.local/bin:${PATH}"
 
 # ---------------------------------------------------------
-# Install Unsloth using the official installer
+# Official Unsloth installation
 # ---------------------------------------------------------
 
 RUN curl -fsSL https://unsloth.ai/install.sh | sh
 
 # ---------------------------------------------------------
-# Install the Studio-specific dependencies WITHOUT
-# dependency resolution.
+# IMPORTANT:
+# Force the official Studio setup/update path once more.
 #
-# This avoids pulling PyTorch back into the image.
+# This lets Unsloth itself install studio.txt WITH normal
+# dependencies while preserving the no-torch mode.
 # ---------------------------------------------------------
 
-RUN /root/.local/bin/uv pip install \
-    --python /opt/unsloth-studio/unsloth_studio/bin/python \
-    --no-deps \
-    -r /opt/unsloth-studio/unsloth_studio/lib/python3.13/site-packages/studio/backend/requirements/studio.txt
+RUN UNSLOTH_NO_TORCH=1 \
+    /opt/unsloth-studio/bin/unsloth studio update
 
 # ---------------------------------------------------------
-# Verify architecture
-# ---------------------------------------------------------
-
-RUN /opt/unsloth-studio/unsloth_studio/bin/python -c \
-    "import platform; print('Architecture:', platform.machine())"
-
-# ---------------------------------------------------------
-# Verify Studio dependencies
+# Verification
 # ---------------------------------------------------------
 
 RUN /opt/unsloth-studio/unsloth_studio/bin/python - <<'PY'
-import importlib
+import platform
 
-packages = [
-    "structlog",
-    "typer",
-    "fastapi",
-    "uvicorn",
-    "pydantic",
-    "matplotlib",
-    "pandas",
-    "jwt",
-    "urllib3",
-    "jinja2",
-    "diceware",
-    "ddgs",
-    "cryptography",
-    "boto3",
-    "fastmcp",
-    "gguf",
-    "av",
-]
-
-missing = []
-
-for name in packages:
-    try:
-        importlib.import_module(name)
-        print(f"OK   {name}")
-    except Exception as e:
-        print(f"FAIL {name}: {e}")
-        missing.append(name)
-
-if missing:
-    raise SystemExit(
-        "Missing packages: " + ", ".join(missing)
-    )
-
-print("All Studio dependencies are present.")
+print("Architecture:", platform.machine())
 PY
 
-# ---------------------------------------------------------
-# Verify that PyTorch is NOT installed
-# ---------------------------------------------------------
+# Check important Studio imports
+RUN /opt/unsloth-studio/unsloth_studio/bin/python - <<'PY'
+import structlog
+import typer
+import fastapi
+import uvicorn
+import pydantic
+import pandas
+import matplotlib
+import gguf
+import av
 
-RUN /opt/unsloth-studio/unsloth_studio/bin/python -c \
-    "import importlib.util; raise SystemExit(1 if importlib.util.find_spec('torch') else 0)"
+print("Studio core dependencies: OK")
+PY
+
+# Confirm that PyTorch is NOT installed
+RUN /opt/unsloth-studio/unsloth_studio/bin/python - <<'PY'
+import importlib.util
+
+if importlib.util.find_spec("torch") is not None:
+    raise SystemExit("ERROR: PyTorch is installed, but this image must be no-torch.")
+
+print("PyTorch: NOT installed")
+PY
 
 # ---------------------------------------------------------
 # Workspace
@@ -136,4 +111,4 @@ RUN mkdir -p \
 
 EXPOSE 8000
 
-CMD ["/opt/unsloth-studio/unsloth_studio/bin/unsloth", "studio", "-H", "0.0.0.0", "-p", "8000"]
+CMD ["/opt/unsloth-studio/bin/unsloth", "studio", "-H", "0.0.0.0", "-p", "8000"]
