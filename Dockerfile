@@ -51,7 +51,7 @@ ENV NONINTERACTIVE=1
 RUN curl -fsSL https://unsloth.ai/install.sh | sh
 
 # The installer normally puts uv / Unsloth commands here.
-ENV PATH="/root/.local/bin:${PATH}"
+ENV PATH="/opt/unsloth-studio/bin:/opt/unsloth-studio/unsloth_studio/bin:${PATH}"
 
 # ---------------------------------------------------------
 # Cleanup build-only packages
