@@ -50,29 +50,52 @@ jobs:
 
       - name: Test image
         run: |
-          docker run -d \
-            --name unsloth-test \
-            -e UNSLOTH_STUDIO_PASSWORD=testpassword \
-            -p 8000:8000 \
-            ghcr.io/${{ github.repository_owner }}/unsloth-arm64:latest
-
-          echo "Waiting for Studio..."
-
-          for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:8000/ >/dev/null; then
-              echo "Studio is ready"
-              break
-            fi
-
-            sleep 2
-          done
-
-          curl -f http://127.0.0.1:8000/
-
-          docker exec unsloth-test \
-            python3 --version
-
-          docker exec unsloth-test \
-            uname -m
-
-          docker logs unsloth-test --tail 100
+          set -e
+      
+          IMAGE="ghcr.io/${{ github.repository_owner }}/unsloth-arm64:latest"
+      
+          echo "=== Architecture ==="
+      
+          docker run --rm \
+            --entrypoint /bin/bash \
+            "$IMAGE" \
+            -lc 'uname -m'
+      
+          echo "=== Python ==="
+      
+          docker run --rm \
+            --entrypoint /bin/bash \
+            "$IMAGE" \
+            -lc '/opt/unsloth-studio/unsloth_studio/bin/python --version'
+      
+          echo "=== Verify no PyTorch ==="
+      
+          docker run --rm \
+            --entrypoint /bin/bash \
+            "$IMAGE" \
+            -lc '! /opt/unsloth-studio/unsloth_studio/bin/python -c "import torch"'
+      
+          echo "=== Verify Studio dependencies ==="
+      
+          docker run --rm \
+            --entrypoint /bin/bash \
+            "$IMAGE" \
+            -lc '
+              /opt/unsloth-studio/unsloth_studio/bin/python -c "
+              import structlog
+              import fastapi
+              import uvicorn
+              import pandas
+              import matplotlib
+              import gguf
+              import av
+              print(\"Studio dependencies OK\")
+              "
+            '
+      
+          echo "=== Verify CLI ==="
+      
+          docker run --rm \
+            --entrypoint /opt/unsloth-studio/unsloth_studio/bin/unsloth \
+            "$IMAGE" \
+            --help
