@@ -26,49 +26,53 @@ RUN apt-get update && apt-get install -y \
 # Unsloth configuration
 # ---------------------------------------------------------
 
-# Do NOT install PyTorch.
-# We want GGUF / llama.cpp CPU mode for Oracle Ampere A1.
+# IMPORTANT:
+# Skip PyTorch completely.
 ENV UNSLOTH_NO_TORCH=1
 
-# Force llama.cpp CPU backend.
+# Use CPU llama.cpp.
 ENV UNSLOTH_LLAMA_CPP_BACKEND=cpu
 
-# Studio llama.cpp-only mode.
+# GGUF / llama.cpp oriented Studio.
 ENV UNSLOTH_STUDIO_LLAMA_ONLY=1
 
-# We are building inside Docker, so never try to launch interactively
-# during installation.
+# Do not auto-start Studio during installation.
 ENV UNSLOTH_SKIP_AUTOSTART=1
 
-# Use Python 3.13.
 ENV UNSLOTH_PYTHON=3.13
 
-# Keep everything self-contained.
+# Keep Unsloth isolated inside the image.
 ENV UNSLOTH_STUDIO_HOME=/opt/unsloth-studio
 
-# Runtime PATH.
 ENV PATH="/opt/unsloth-studio/bin:/opt/unsloth-studio/unsloth_studio/bin:/root/.local/bin:${PATH}"
 
 # ---------------------------------------------------------
-# Install official Unsloth Studio
+# Install Unsloth using the official installer
 # ---------------------------------------------------------
 
 RUN curl -fsSL https://unsloth.ai/install.sh | sh
 
 # ---------------------------------------------------------
-# IMPORTANT:
-# The installer installs the core package, but Studio's optional
-# dependencies need to be installed explicitly for our no-torch
-# image.
+# Install the Studio-specific dependencies WITHOUT
+# dependency resolution.
+#
+# This avoids pulling PyTorch back into the image.
 # ---------------------------------------------------------
 
 RUN /root/.local/bin/uv pip install \
     --python /opt/unsloth-studio/unsloth_studio/bin/python \
-    "unsloth[studio]" \
-    --no-cache
+    --no-deps \
+    -r /opt/unsloth-studio/unsloth_studio/lib/python3.13/site-packages/studio/backend/requirements/studio.txt
 
 # ---------------------------------------------------------
-# Verify Studio installation during image build
+# Verify architecture
+# ---------------------------------------------------------
+
+RUN /opt/unsloth-studio/unsloth_studio/bin/python -c \
+    "import platform; print('Architecture:', platform.machine())"
+
+# ---------------------------------------------------------
+# Verify Studio dependencies
 # ---------------------------------------------------------
 
 RUN /opt/unsloth-studio/unsloth_studio/bin/python - <<'PY'
@@ -96,28 +100,28 @@ packages = [
 
 missing = []
 
-for pkg in packages:
+for name in packages:
     try:
-        importlib.import_module(pkg)
-        print(f"OK   {pkg}")
-    except Exception as exc:
-        print(f"FAIL {pkg}: {exc}")
-        missing.append(pkg)
+        importlib.import_module(name)
+        print(f"OK   {name}")
+    except Exception as e:
+        print(f"FAIL {name}: {e}")
+        missing.append(name)
 
 if missing:
     raise SystemExit(
-        "Missing Studio dependencies: " + ", ".join(missing)
+        "Missing packages: " + ", ".join(missing)
     )
 
-print("All required Studio dependencies are installed.")
+print("All Studio dependencies are present.")
 PY
 
 # ---------------------------------------------------------
-# Verify that PyTorch was NOT installed
+# Verify that PyTorch is NOT installed
 # ---------------------------------------------------------
 
-RUN ! /opt/unsloth-studio/unsloth_studio/bin/python -c \
-    "import torch"
+RUN /opt/unsloth-studio/unsloth_studio/bin/python -c \
+    "import importlib.util; raise SystemExit(1 if importlib.util.find_spec('torch') else 0)"
 
 # ---------------------------------------------------------
 # Workspace
